@@ -1,0 +1,15 @@
+name: Aggiorna archivio LottoTools
+
+on:
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Test avvio manuale
+        run: |
+          echo "LottoTools - Test aggiornamento archivio"
+          echo "Workflow avviato correttamente!"
+          echo "Nessun file è stato modificato."
