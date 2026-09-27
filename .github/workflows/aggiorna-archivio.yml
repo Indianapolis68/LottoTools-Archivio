@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   controllo:
@@ -483,12 +483,132 @@ jobs:
 
 
           # ============================================================
-          # 4 - SOLO SIMULAZIONE
+          # 4 - VALIDAZIONE FINALE E SCRITTURA
           # ============================================================
 
           print("")
           print("========================================")
-          print(" SIMULAZIONE COMPLETATA")
-          print(" AggArcMob.txt NON modificato")
-          print(" Nuove righe generate:", len(nuove_righe))
+          print(" LOTTOOLS - VALIDAZIONE FINALE")
           print("========================================")
+
+          if not nuove_righe:
+              print("Nessuna nuova estrazione da pubblicare.")
+              print("AggArcMob.txt non modificato.")
+
+          else:
+
+              righe_finali = righe + nuove_righe
+
+              progressivo_precedente = None
+              data_precedente = None
+
+              for indice, riga in enumerate(righe_finali, start=1):
+
+                  if len(riga) != 124:
+                      raise Exception(
+                          f"Validazione finale - riga {indice}: "
+                          f"lunghezza {len(riga)}, attesa 124."
+                      )
+
+                  if not riga[:4].isdigit():
+                      raise Exception(
+                          f"Validazione finale - riga {indice}: "
+                          "progressivo non valido."
+                      )
+
+                  progressivo = int(riga[:4])
+
+                  try:
+                      data_riga = datetime.strptime(
+                          riga[4:14], "%d-%m-%Y"
+                      ).date()
+                  except ValueError:
+                      raise Exception(
+                          f"Validazione finale - riga {indice}: "
+                          "data non valida."
+                      )
+
+                  dati = riga[14:124]
+
+                  if len(dati) != 110 or not dati.isdigit():
+                      raise Exception(
+                          f"Validazione finale - riga {indice}: "
+                          "dati estrazione non validi."
+                      )
+
+                  if progressivo_precedente is not None:
+
+                      if progressivo != progressivo_precedente + 1:
+                          raise Exception(
+                              f"Validazione finale - riga {indice}: "
+                              "sequenza progressivi interrotta."
+                          )
+
+                      if data_riga <= data_precedente:
+                          raise Exception(
+                              f"Validazione finale - riga {indice}: "
+                              "sequenza date non valida."
+                          )
+
+                  progressivo_precedente = progressivo
+                  data_precedente = data_riga
+
+              contenuto_finale = "\n".join(righe_finali) + "\n"
+
+              archivio.write_text(
+                  contenuto_finale,
+                  encoding="utf-8"
+              )
+
+              # Rileggo il file realmente scritto
+              verifica = [
+                  x.strip()
+                  for x in archivio.read_text(
+                      encoding="utf-8"
+                  ).splitlines()
+                  if x.strip()
+              ]
+
+              if len(verifica) != len(righe_finali):
+                  raise Exception(
+                      "Verifica dopo scrittura: numero righe errato."
+                  )
+
+              if verifica[-1] != nuove_righe[-1]:
+                  raise Exception(
+                      "Verifica dopo scrittura: ultima riga diversa."
+                  )
+
+              print("Archivio completo validato: OK")
+              print("Scrittura locale nel runner: OK")
+              print("Rilettura dopo scrittura: OK")
+              print("Righe totali:", len(verifica))
+              print(
+                  "Ultima progressiva:",
+                  int(verifica[-1][:4])
+              )
+              print(
+                  "Ultima data:",
+                  verifica[-1][4:14]
+              )
+              print("Pronto per la pubblicazione GitHub.")
+      - name: Pubblica archivio aggiornato
+        shell: bash
+        run: |
+          if git diff --quiet -- AggArcMob.txt; then
+            echo "Nessuna modifica da pubblicare."
+            exit 0
+          fi
+
+          git config user.name "LottoTools Updater"
+          git config user.email "actions@github.com"
+
+          git add AggArcMob.txt
+          git commit -m "Aggiornamento automatico archivio LottoTools"
+          git push
+
+          echo ""
+          echo "========================================"
+          echo " LOTTOOLS - PUBBLICAZIONE COMPLETATA"
+          echo "========================================"
+          echo "AggArcMob.txt pubblicato su GitHub."  
