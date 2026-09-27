@@ -553,12 +553,9 @@ jobs:
                   progressivo_precedente = progressivo
                   data_precedente = data_riga
 
-              contenuto_finale = "\n".join(righe_finali) + "\n"
-
-              archivio.write_text(
-                  contenuto_finale,
-                  encoding="utf-8"
-              )
+              with archivio.open("a", encoding="utf-8", newline="") as f:
+                for nuova_riga in nuove_righe:
+                    f.write(nuova_riga + "\n")
 
               # Rileggo il file realmente scritto
               verifica = [
