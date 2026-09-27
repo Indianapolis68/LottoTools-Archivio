@@ -3,13 +3,105 @@ name: Aggiorna archivio LottoTools
 on:
   workflow_dispatch:
 
+permissions:
+  contents: read
+
 jobs:
-  test:
+  controllo:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Test avvio manuale
+      - name: Scarica repository
+        uses: actions/checkout@v4
+
+      - name: Controlla archivio AggArcMob
+        shell: python
         run: |
-          echo "LottoTools - Test aggiornamento archivio"
-          echo "Workflow avviato correttamente!"
-          echo "Nessun file è stato modificato."
+          from pathlib import Path
+          from datetime import datetime
+
+          file_archivio = Path("AggArcMob.txt")
+
+          if not file_archivio.exists():
+              raise Exception("AggArcMob.txt non trovato.")
+
+          righe = [
+              r.strip()
+              for r in file_archivio.read_text(encoding="utf-8").splitlines()
+              if r.strip()
+          ]
+
+          if not righe:
+              raise Exception("AggArcMob.txt è vuoto.")
+
+          progressivo_precedente = None
+          data_precedente = None
+
+          for indice, riga in enumerate(righe, start=1):
+
+              if len(riga) != 124:
+                  raise Exception(
+                      f"Riga {indice}: lunghezza {len(riga)}, attesa 124."
+                  )
+
+              progressivo_txt = riga[0:4]
+
+              if not progressivo_txt.isdigit():
+                  raise Exception(
+                      f"Riga {indice}: progressivo non valido."
+                  )
+
+              progressivo = int(progressivo_txt)
+
+              try:
+                  data_estrazione = datetime.strptime(
+                      riga[4:14], "%d-%m-%Y"
+                  ).date()
+              except ValueError:
+                  raise Exception(
+                      f"Riga {indice}: data non valida."
+                  )
+
+              dati_estrazione = riga[14:124]
+
+              if len(dati_estrazione) != 110:
+                  raise Exception(
+                      f"Riga {indice}: dati estrazione non validi."
+                  )
+
+              if not dati_estrazione.isdigit():
+                  raise Exception(
+                      f"Riga {indice}: dati estrazione non numerici."
+                  )
+
+              if progressivo_precedente is not None:
+
+                  if progressivo != progressivo_precedente + 1:
+                      raise Exception(
+                          f"Riga {indice}: sequenza progressivi interrotta."
+                      )
+
+                  if data_estrazione <= data_precedente:
+                      raise Exception(
+                          f"Riga {indice}: sequenza date non valida."
+                      )
+
+              progressivo_precedente = progressivo
+              data_precedente = data_estrazione
+
+          prima_progressiva = int(righe[0][0:4])
+          ultima_progressiva = int(righe[-1][0:4])
+          ultima_data = datetime.strptime(
+              righe[-1][4:14], "%d-%m-%Y"
+          ).strftime("%d-%m-%Y")
+
+          print("")
+          print("========================================")
+          print(" LOTTOOLS - CONTROLLO ARCHIVIO GITHUB")
+          print("========================================")
+          print("Archivio GitHub valido.")
+          print(f"Righe totali: {len(righe)}")
+          print(f"Prima progressiva: {prima_progressiva}")
+          print(f"Ultima progressiva: {ultima_progressiva}")
+          print(f"Ultima data: {ultima_data}")
+          print("========================================")
