@@ -310,13 +310,16 @@ jobs:
           if not archivio.exists():
               raise Exception("AggArcMob.txt non trovato.")
 
-          righe = [
-              x.strip()
-              for x in archivio.read_text(
-                  encoding="utf-8"
-              ).splitlines()
-              if x.strip()
-          ]
+          contenuto_archivio = archivio.read_text(encoding="utf-8")
+          righe = contenuto_archivio.splitlines()
+
+          for numero_riga, riga in enumerate(righe, start=1):
+              if not riga.strip():
+                  raise Exception(
+                      f"Archivio GitHub non valido: riga {numero_riga} vuota."
+                  )
+
+          righe = [x.strip() for x in righe]
 
           if not righe:
               raise Exception("AggArcMob.txt vuoto.")
@@ -366,8 +369,7 @@ jobs:
 
               progressivo_precedente = progressivo
               data_precedente = data_riga
-
-
+             
           ultimo_progressivo = progressivo_precedente
           ultima_data = data_precedente
 
