@@ -20,9 +20,26 @@ jobs:
           from pathlib import Path
           from datetime import datetime, date
           from urllib.request import Request, urlopen
-          from urllib.parse import urlencode
           import re
           import json
+
+          # ============================================================
+          # COSTANTI
+          # ============================================================
+
+          USER_AGENT = "Mozilla/5.0 LottoToolsUpdater/1.0"
+
+          NOMI_RUOTE_ADM = [
+              "BARI", "CAGLIARI", "FIRENZE", "GENOVA",
+              "MILANO", "NAPOLI", "PALERMO", "ROMA",
+              "TORINO", "VENEZIA", "NAZIONALE"
+          ]
+
+          ORDINE_LOTTO_ITALIA = [
+              "BA", "CA", "FI", "GE", "MI",
+              "NA", "PA", "RM", "TO", "VE", "RN"
+          ]
+
 
           # ============================================================
           # FUNZIONI INTERNET
@@ -31,13 +48,18 @@ jobs:
           def scarica_testo(url):
               req = Request(
                   url,
-                  headers={"User-Agent": "Mozilla/5.0 LottoToolsUpdater/1.0"}
+                  headers={"User-Agent": USER_AGENT}
               )
+
               with urlopen(req, timeout=30) as response:
-                  return response.read().decode("utf-8", errors="replace")
+                  return response.read().decode(
+                      "utf-8",
+                      errors="replace"
+                  )
 
 
           def scarica_elenco_mensile_adm(anno, mese):
+
               url = (
                   "https://www.adm.gov.it/portale/monopoli/giochi/"
                   "gioco-del-lotto/lotto_g/lotto_estr"
@@ -52,6 +74,14 @@ jobs:
 
               html = scarica_testo(url)
 
+              # Una risposta completamente vuota è un'anomalia.
+              # NON significa archivio aggiornato.
+              if not html or not html.strip():
+                  raise Exception(
+                      "ADM: risposta mensile vuota per "
+                      + f"{mese:02d}/{anno}."
+                  )
+
               matches = re.findall(
                   r"N\.(\d+)\s+di\s+.*?(\d{2}/\d{2}/\d{4})",
                   html,
@@ -64,14 +94,72 @@ jobs:
                   risultato.append({
                       "progressivo": int(progressivo),
                       "data": datetime.strptime(
-                          data_txt, "%d/%m/%Y"
+                          data_txt,
+                          "%d/%m/%Y"
                       ).date()
                   })
 
               return risultato
 
 
+          def scarica_ultimo_riferimento_adm():
+
+              url = (
+                  "https://www.adm.gov.it/portale/monopoli/giochi/"
+                  "gioco-del-lotto/lotto_g"
+                  "?p_p_id=it_sogei_wda_web_portlet_WebDisplayAamsPortlet"
+                  "&p_p_lifecycle=2"
+                  "&p_p_state=normal"
+                  "&p_p_mode=view"
+                  "&p_p_cacheability=cacheLevelPage"
+              )
+
+              req = Request(
+                  url,
+                  data=b"",
+                  headers={"User-Agent": USER_AGENT},
+                  method="POST"
+              )
+
+              with urlopen(req, timeout=30) as response:
+                  html = response.read().decode(
+                      "utf-8",
+                      errors="replace"
+                  )
+
+              if not html or not html.strip():
+                  raise Exception(
+                      "ADM: risposta vuota durante la ricerca "
+                      "dell'ultima estrazione."
+                  )
+
+              titolo = re.search(
+                  r"Estrazione\s+n(?:°|&deg;)"
+                  r"(?:\s|&nbsp;)*?(\d+)"
+                  r"(?:\s|&nbsp;)*del"
+                  r"(?:\s|&nbsp;)*"
+                  r"(\d{2}/\d{2}/\d{4})",
+                  html,
+                  re.IGNORECASE
+              )
+
+              if not titolo:
+                  raise Exception(
+                      "ADM: impossibile individuare numero e data "
+                      "dell'ultima estrazione."
+                  )
+
+              return {
+                  "progressivo": int(titolo.group(1)),
+                  "data": datetime.strptime(
+                      titolo.group(2),
+                      "%d/%m/%Y"
+                  ).date()
+              }
+
+
           def scarica_estrazione_adm(anno, progressivo):
+
               url = (
                   "https://www.adm.gov.it/portale/monopoli/giochi/"
                   "gioco-del-lotto/lotto_g"
@@ -86,10 +174,21 @@ jobs:
 
               html = scarica_testo(url)
 
+              if not html or not html.strip():
+                  raise Exception(
+                      "ADM: risposta vuota per progressivo "
+                      + str(progressivo)
+                      + "."
+                  )
+
               titolo = re.search(
-                  r"Estrazione n&deg;&nbsp;(\d+)&nbsp;del&nbsp;"
+                  r"Estrazione\s+n(?:°|&deg;)"
+                  r"(?:\s|&nbsp;)*?(\d+)"
+                  r"(?:\s|&nbsp;)*del"
+                  r"(?:\s|&nbsp;)*"
                   r"(\d{2}/\d{2}/\d{4})",
-                  html
+                  html,
+                  re.IGNORECASE
               )
 
               if not titolo:
@@ -101,35 +200,54 @@ jobs:
 
               if progressivo_trovato != progressivo:
                   raise Exception(
-                      "ADM ha restituito un progressivo diverso."
+                      "ADM ha restituito un progressivo diverso. "
+                      + "Richiesto "
+                      + str(progressivo)
+                      + ", ricevuto "
+                      + str(progressivo_trovato)
+                      + "."
                   )
 
               data_estrazione = datetime.strptime(
-                  titolo.group(2), "%d/%m/%Y"
+                  titolo.group(2),
+                  "%d/%m/%Y"
               ).date()
 
-              nomi_ruote = [
-                  "BARI", "CAGLIARI", "FIRENZE", "GENOVA",
-                  "MILANO", "NAPOLI", "PALERMO", "ROMA",
-                  "TORINO", "VENEZIA", "NAZIONALE"
-              ]
+              if data_estrazione.year != anno:
+                  raise Exception(
+                      "ADM: anno dell'estrazione non coerente. "
+                      + "Anno richiesto "
+                      + str(anno)
+                      + ", data restituita "
+                      + data_estrazione.strftime("%d/%m/%Y")
+                      + "."
+                  )
 
               numeri = []
 
-              for nome_ruota in nomi_ruote:
+              for nome_ruota in NOMI_RUOTE_ADM:
 
-                  inizio = html.find(">" + nome_ruota + "</h3>")
+                  inizio = html.find(
+                      ">" + nome_ruota + "</h3>"
+                  )
 
                   if inizio == -1:
                       raise Exception(
-                          "Ruota " + nome_ruota + " non trovata."
+                          "Ruota "
+                          + nome_ruota
+                          + " non trovata."
                       )
 
-                  fine = html.find("Numero Oro:", inizio)
+                  fine = html.find(
+                      "Numero Oro:",
+                      inizio
+                  )
 
                   if fine == -1:
                       raise Exception(
-                          "Fine dati ruota " + nome_ruota + " non trovata."
+                          "Fine dati ruota "
+                          + nome_ruota
+                          + " non trovata."
                       )
 
                   blocco = html[inizio:fine]
@@ -143,6 +261,8 @@ jobs:
                       raise Exception(
                           "Numero estratti non corretto sulla ruota "
                           + nome_ruota
+                          + ". Trovati: "
+                          + str(len(estratti))
                       )
 
                   valori = [int(x) for x in estratti]
@@ -152,9 +272,22 @@ jobs:
                           raise Exception(
                               "Estratto non valido sulla ruota "
                               + nome_ruota
+                              + "."
                           )
 
+                  if len(set(valori)) != 5:
+                      raise Exception(
+                          "ADM: estratti duplicati sulla ruota "
+                          + nome_ruota
+                          + "."
+                      )
+
                   numeri.append(valori)
+
+              if len(numeri) != 11:
+                  raise Exception(
+                      "ADM: numero ruote non corretto."
+                  )
 
               return {
                   "progressivo": progressivo_trovato,
@@ -163,11 +296,127 @@ jobs:
               }
 
 
+          # ============================================================
+          # CAMBIO ANNO ADM
+          # ============================================================
+
+          def trova_ultimo_riferimento_anno_adm(anno):
+
+              try:
+                  elenco_dicembre = scarica_elenco_mensile_adm(
+                      anno,
+                      12
+                  )
+              except Exception as ex:
+                  raise Exception(
+                      "ADM: impossibile individuare l'ultima "
+                      "estrazione dell'anno "
+                      + str(anno)
+                      + ". Elenco di dicembre non disponibile."
+                  ) from ex
+
+              if not elenco_dicembre:
+                  raise Exception(
+                      "ADM: nessuna estrazione trovata per dicembre "
+                      + str(anno)
+                      + ". Impossibile attraversare il cambio anno."
+                  )
+
+              ultimo = max(
+                  elenco_dicembre,
+                  key=lambda x: x["data"]
+              )
+
+              if ultimo["data"].year != anno:
+                  raise Exception(
+                      "ADM: anno non coerente nell'ultima "
+                      "estrazione del "
+                      + str(anno)
+                      + "."
+                  )
+
+              return ultimo
+
+
+          def ricostruisci_riferimenti_adm(
+              ultima_data_locale,
+              ultimo_rif_adm
+          ):
+
+              risultato = []
+
+              anno_adm = ultimo_rif_adm["data"].year
+              progressivo_adm = ultimo_rif_adm["progressivo"]
+
+              while True:
+
+                  if progressivo_adm < 1:
+
+                      anno_adm -= 1
+
+                      ultimo_anno_precedente = (
+                          trova_ultimo_riferimento_anno_adm(
+                              anno_adm
+                          )
+                      )
+
+                      progressivo_adm = (
+                          ultimo_anno_precedente["progressivo"]
+                      )
+
+                  estr_adm = scarica_estrazione_adm(
+                      anno_adm,
+                      progressivo_adm
+                  )
+
+                  if estr_adm["data"].year != anno_adm:
+                      raise Exception(
+                          "ADM: anno dell'estrazione "
+                          "non coerente."
+                      )
+
+                  if estr_adm["data"] <= ultima_data_locale:
+
+                      if estr_adm["data"] != ultima_data_locale:
+                          raise Exception(
+                              "ADM: anomalia nella sequenza "
+                              "delle estrazioni. "
+                              + "Ultima data archivio GitHub: "
+                              + ultima_data_locale.strftime(
+                                  "%d/%m/%Y"
+                              )
+                              + " - Data ADM raggiunta: "
+                              + estr_adm["data"].strftime(
+                                  "%d/%m/%Y"
+                              )
+                          )
+
+                      break
+
+                  risultato.append({
+                      "progressivo": estr_adm["progressivo"],
+                      "data": estr_adm["data"]
+                  })
+
+                  progressivo_adm -= 1
+
+              risultato.sort(
+                  key=lambda x: x["data"]
+              )
+
+              return risultato
+
+
+          # ============================================================
+          # LOTTO ITALIA
+          # ============================================================
+
           def scarica_estrazione_lotto_italia(data_estrazione):
 
               url = (
                   "https://www.lotto-italia.it/gdl/"
-                  "estrazioni-e-vincite/estrazioni-del-lotto.json"
+                  "estrazioni-e-vincite/"
+                  "estrazioni-del-lotto.json"
               )
 
               corpo = json.dumps({
@@ -178,7 +427,7 @@ jobs:
                   url,
                   data=corpo,
                   headers={
-                      "User-Agent": "Mozilla/5.0 LottoToolsUpdater/1.0",
+                      "User-Agent": USER_AGENT,
                       "Content-Type": "application/json"
                   },
                   method="POST"
@@ -213,31 +462,42 @@ jobs:
                       "Numero ruote Lotto Italia non corretto."
                   )
 
-              ordine = [
-                  "BA", "CA", "FI", "GE", "MI",
-                  "NA", "PA", "RM", "TO", "VE", "RN"
-              ]
-
               numeri = []
 
               for indice, ruota in enumerate(elenco):
 
-                  sigla = str(ruota["ruota"]).upper()
+                  if "ruota" not in ruota:
+                      raise Exception(
+                          "Lotto Italia: sigla ruota mancante."
+                      )
 
-                  if sigla != ordine[indice]:
+                  if "numeri" not in ruota:
+                      raise Exception(
+                          "Lotto Italia: numeri ruota mancanti."
+                      )
+
+                  sigla = str(
+                      ruota["ruota"]
+                  ).upper()
+
+                  if sigla != ORDINE_LOTTO_ITALIA[indice]:
                       raise Exception(
                           "Ordine ruote Lotto Italia non corretto. "
-                          "Attesa "
-                          + ordine[indice]
+                          + "Attesa "
+                          + ORDINE_LOTTO_ITALIA[indice]
                           + ", trovata "
                           + sigla
                       )
 
-                  valori = [int(x) for x in ruota["numeri"]]
+                  valori = [
+                      int(x)
+                      for x in ruota["numeri"]
+                  ]
 
                   if len(valori) != 5:
                       raise Exception(
-                          "Numero estratti Lotto Italia non corretto."
+                          "Numero estratti Lotto Italia "
+                          "non corretto."
                       )
 
                   for valore in valori:
@@ -245,6 +505,14 @@ jobs:
                           raise Exception(
                               "Estratto Lotto Italia non valido."
                           )
+
+                  if len(set(valori)) != 5:
+                      raise Exception(
+                          "Lotto Italia: estratti duplicati "
+                          "sulla ruota "
+                          + sigla
+                          + "."
+                      )
 
                   numeri.append(valori)
 
@@ -269,7 +537,10 @@ jobs:
               for r in range(11):
                   for n in range(5):
 
-                      if adm["numeri"][r][n] != lotto["numeri"][r][n]:
+                      if (
+                          adm["numeri"][r][n]
+                          != lotto["numeri"][r][n]
+                      ):
                           raise Exception(
                               "Controllo incrociato fallito - "
                               + adm["data"].strftime("%d/%m/%Y")
@@ -277,11 +548,24 @@ jobs:
                               + nomi[r]
                               + " - "
                               + str(n + 1)
-                              + "° estratto"
+                              + "° estratto. ADM="
+                              + str(adm["numeri"][r][n])
+                              + " LottoItalia="
+                              + str(lotto["numeri"][r][n])
                           )
 
 
+          # ============================================================
+          # CREAZIONE RIGA LOTTOOLS
+          # ============================================================
+
           def crea_riga(progressivo_lottotools, estrazione):
+
+              if progressivo_lottotools > 9999:
+                  raise Exception(
+                      "Progressivo LottoTools superiore a 9999. "
+                      "Il formato a 4 cifre deve essere aggiornato."
+                  )
 
               riga = (
                   f"{progressivo_lottotools:04d}"
@@ -302,76 +586,150 @@ jobs:
 
 
           # ============================================================
+          # VALIDAZIONE ARCHIVIO LOTTOOLS
+          # ============================================================
+
+          def valida_righe_archivio(righe, descrizione):
+
+              if not righe:
+                  raise Exception(
+                      descrizione + ": archivio vuoto."
+                  )
+
+              progressivo_precedente = None
+              data_precedente = None
+
+              for indice, riga in enumerate(
+                  righe,
+                  start=1
+              ):
+
+                  if not riga:
+                      raise Exception(
+                          f"{descrizione}: riga {indice} vuota."
+                      )
+
+                  if riga != riga.strip():
+                      raise Exception(
+                          f"{descrizione}: riga {indice} "
+                          "contiene spazi iniziali o finali."
+                      )
+
+                  if len(riga) != 124:
+                      raise Exception(
+                          f"{descrizione}: riga {indice}: "
+                          f"lunghezza {len(riga)}, attesa 124."
+                      )
+
+                  if not riga[:4].isdigit():
+                      raise Exception(
+                          f"{descrizione}: riga {indice}: "
+                          "progressivo non valido."
+                      )
+
+                  progressivo = int(riga[:4])
+
+                  try:
+                      data_riga = datetime.strptime(
+                          riga[4:14],
+                          "%d-%m-%Y"
+                      ).date()
+                  except ValueError:
+                      raise Exception(
+                          f"{descrizione}: riga {indice}: "
+                          "data non valida."
+                      )
+
+                  dati = riga[14:]
+
+                  if len(dati) != 110:
+                      raise Exception(
+                          f"{descrizione}: riga {indice}: "
+                          "lunghezza dati estrazione non valida."
+                      )
+
+                  if not dati.isdigit():
+                      raise Exception(
+                          f"{descrizione}: riga {indice}: "
+                          "estrazione non numerica."
+                      )
+
+                  valori = [
+                      int(dati[i:i + 2])
+                      for i in range(0, 110, 2)
+                  ]
+
+                  if len(valori) != 55:
+                      raise Exception(
+                          f"{descrizione}: riga {indice}: "
+                          "numero estratti non valido."
+                      )
+
+                  for valore in valori:
+                      if valore < 1 or valore > 90:
+                          raise Exception(
+                              f"{descrizione}: riga {indice}: "
+                              "estratto fuori intervallo 1-90."
+                          )
+
+                  for r in range(11):
+                      ruota = valori[r * 5:(r + 1) * 5]
+
+                      if len(set(ruota)) != 5:
+                          raise Exception(
+                              f"{descrizione}: riga {indice}: "
+                              "estratti duplicati nella stessa ruota."
+                          )
+
+                  if progressivo_precedente is not None:
+
+                      if (
+                          progressivo
+                          != progressivo_precedente + 1
+                      ):
+                          raise Exception(
+                              f"{descrizione}: riga {indice}: "
+                              "progressivi non consecutivi."
+                          )
+
+                      if data_riga <= data_precedente:
+                          raise Exception(
+                              f"{descrizione}: riga {indice}: "
+                              "date non crescenti."
+                          )
+
+                  progressivo_precedente = progressivo
+                  data_precedente = data_riga
+
+              return (
+                  progressivo_precedente,
+                  data_precedente
+              )
+
+
+          # ============================================================
           # 1 - LEGGO E VALIDO AGGARCMOB
           # ============================================================
 
           archivio = Path("AggArcMob.txt")
 
           if not archivio.exists():
-              raise Exception("AggArcMob.txt non trovato.")
+              raise Exception(
+                  "AggArcMob.txt non trovato."
+              )
 
-          contenuto_archivio = archivio.read_text(encoding="utf-8")
+          contenuto_archivio = archivio.read_text(
+              encoding="utf-8"
+          )
+
           righe = contenuto_archivio.splitlines()
 
-          for numero_riga, riga in enumerate(righe, start=1):
-              if not riga.strip():
-                  raise Exception(
-                      f"Archivio GitHub non valido: riga {numero_riga} vuota."
-                  )
-
-          righe = [x.strip() for x in righe]
-
-          if not righe:
-              raise Exception("AggArcMob.txt vuoto.")
-
-          progressivo_precedente = None
-          data_precedente = None
-
-          for indice, riga in enumerate(righe, start=1):
-
-              if len(riga) != 124:
-                  raise Exception(
-                      f"Riga {indice}: lunghezza non valida."
-                  )
-
-              if not riga[:4].isdigit():
-                  raise Exception(
-                      f"Riga {indice}: progressivo non valido."
-                  )
-
-              progressivo = int(riga[:4])
-
-              try:
-                  data_riga = datetime.strptime(
-                      riga[4:14], "%d-%m-%Y"
-                  ).date()
-              except ValueError:
-                  raise Exception(
-                      f"Riga {indice}: data non valida."
-                  )
-
-              if not riga[14:].isdigit():
-                  raise Exception(
-                      f"Riga {indice}: estrazione non numerica."
-                  )
-
-              if progressivo_precedente is not None:
-
-                  if progressivo != progressivo_precedente + 1:
-                      raise Exception(
-                          f"Riga {indice}: progressivi non consecutivi."
-                      )
-
-                  if data_riga <= data_precedente:
-                      raise Exception(
-                          f"Riga {indice}: date non crescenti."
-                      )
-
-              progressivo_precedente = progressivo
-              data_precedente = data_riga
-             
-          ultimo_progressivo = progressivo_precedente
-          ultima_data = data_precedente
+          ultimo_progressivo, ultima_data = (
+              valida_righe_archivio(
+                  righe,
+                  "Archivio GitHub iniziale"
+              )
+          )
 
           print("")
           print("========================================")
@@ -386,30 +744,71 @@ jobs:
 
 
           # ============================================================
-          # 2 - CERCO I RIFERIMENTI ADM SUCCESSIVI
+          # 2 - CONTROLLO MENSILE ADM
           # ============================================================
 
           oggi = date.today()
 
+          if ultima_data > oggi:
+              raise Exception(
+                  "AggArcMob.txt contiene una data futura: "
+                  + ultima_data.strftime("%d/%m/%Y")
+              )
+
           anno = ultima_data.year
           mese = ultima_data.month
 
-          riferimenti = []
+          riferimenti_mensili = []
 
           while True:
 
-              elenco = scarica_elenco_mensile_adm(
-                  anno, mese
-              )
+              try:
+                  elenco = scarica_elenco_mensile_adm(
+                      anno,
+                      mese
+                  )
 
-              for rif in elenco:
-                  if (
-                      rif["data"] > ultima_data
-                      and rif["data"] <= oggi
-                  ):
-                      riferimenti.append(rif)
+                  print(
+                      "ADM mensile "
+                      + f"{mese:02d}/{anno}: "
+                      + str(len(elenco))
+                      + " riferimenti."
+                  )
 
-              if anno == oggi.year and mese == oggi.month:
+                  for rif in elenco:
+
+                      if (
+                          rif["data"] > ultima_data
+                          and rif["data"] <= oggi
+                      ):
+
+                          if not any(
+                              x["data"] == rif["data"]
+                              for x in riferimenti_mensili
+                          ):
+                              riferimenti_mensili.append(rif)
+
+              except Exception as ex:
+
+                  # Il mensile non decide MAI da solo
+                  # che l'archivio sia aggiornato.
+                  print(
+                      "ATTENZIONE: elenco mensile ADM "
+                      + f"{mese:02d}/{anno} non disponibile."
+                  )
+                  print(
+                      "Motivo:",
+                      str(ex)
+                  )
+                  print(
+                      "Proseguo con il controllo "
+                      "indipendente dell'ultima estrazione ADM."
+                  )
+
+              if (
+                  anno == oggi.year
+                  and mese == oggi.month
+              ):
                   break
 
               mese += 1
@@ -418,18 +817,108 @@ jobs:
                   mese = 1
                   anno += 1
 
+
+          # ============================================================
+          # 3 - CONTROLLO INDIPENDENTE ULTIMA ESTRAZIONE ADM
+          # ============================================================
+
+          ultimo_rif_adm = (
+              scarica_ultimo_riferimento_adm()
+          )
+
+          print("")
+          print(
+              "Ultima estrazione ADM:",
+              ultimo_rif_adm["progressivo"],
+              "-",
+              ultimo_rif_adm["data"].strftime("%d/%m/%Y")
+          )
+
+          if ultimo_rif_adm["data"] > oggi:
+              raise Exception(
+                  "ADM: ultima estrazione con data futura: "
+                  + ultimo_rif_adm["data"].strftime("%d/%m/%Y")
+              )
+
+          riferimenti = []
+
+          if ultimo_rif_adm["data"] > ultima_data:
+
+              riferimenti = ricostruisci_riferimenti_adm(
+                  ultima_data,
+                  ultimo_rif_adm
+              )
+
+          elif ultimo_rif_adm["data"] == ultima_data:
+
+              riferimenti = []
+
+          else:
+
+              raise Exception(
+                  "ADM risulta più indietro dell'archivio GitHub. "
+                  + "Ultima data GitHub: "
+                  + ultima_data.strftime("%d/%m/%Y")
+                  + " - Ultima data ADM: "
+                  + ultimo_rif_adm["data"].strftime("%d/%m/%Y")
+                  + ". Nessuna modifica eseguita."
+              )
+
+
+          # ============================================================
+          # 4 - CONFRONTO RIFERIMENTI MENSILI / RICOSTRUITI
+          # ============================================================
+
           riferimenti.sort(
               key=lambda x: x["data"]
           )
 
+          riferimenti_mensili.sort(
+              key=lambda x: x["data"]
+          )
+
+          print("")
           print(
-              "Estrazioni mancanti trovate:",
+              "Riferimenti trovati dal mensile ADM:",
+              len(riferimenti_mensili)
+          )
+
+          print(
+              "Riferimenti ricostruiti dal controllo indipendente:",
+              len(riferimenti)
+          )
+
+          # Se il mensile ha fornito riferimenti, le date che
+          # compaiono in entrambe le fonti devono avere lo stesso
+          # progressivo ADM.
+          mensili_per_data = {
+              x["data"]: x["progressivo"]
+              for x in riferimenti_mensili
+          }
+
+          for rif in riferimenti:
+
+              if rif["data"] in mensili_per_data:
+
+                  if (
+                      mensili_per_data[rif["data"]]
+                      != rif["progressivo"]
+                  ):
+                      raise Exception(
+                          "ADM: discordanza tra elenco mensile "
+                          "e ricostruzione indipendente per "
+                          + rif["data"].strftime("%d/%m/%Y")
+                          + "."
+                      )
+
+          print(
+              "Estrazioni mancanti definitive:",
               len(riferimenti)
           )
 
 
           # ============================================================
-          # 3 - ADM + LOTTO ITALIA + CONFRONTO
+          # 5 - ADM + LOTTO ITALIA + CONFRONTO
           # ============================================================
 
           nuove_righe = []
@@ -449,12 +938,10 @@ jobs:
                   rif["progressivo"]
               )
 
-              # Il dettaglio ADM deve corrispondere
-              # al riferimento mensile ADM.
               if adm["data"] != rif["data"]:
                   raise Exception(
                       "La data del dettaglio ADM non coincide "
-                      "con l'elenco mensile ADM."
+                      "con il riferimento ricostruito."
                   )
 
               print("ADM: OK")
@@ -465,9 +952,14 @@ jobs:
 
               print("Lotto Italia: OK")
 
-              confronta(adm, lotto)
+              confronta(
+                  adm,
+                  lotto
+              )
 
-              print("Confronto 55 estratti: OK")
+              print(
+                  "Confronto 55 estratti: OK"
+              )
 
               nuovo_progressivo += 1
 
@@ -476,7 +968,9 @@ jobs:
                   adm
               )
 
-              nuove_righe.append(riga)
+              nuove_righe.append(
+                  riga
+              )
 
               print(
                   "Nuova riga LottoTools:",
@@ -485,7 +979,7 @@ jobs:
 
 
           # ============================================================
-          # 4 - VALIDAZIONE FINALE E SCRITTURA
+          # 6 - VALIDAZIONE FINALE
           # ============================================================
 
           print("")
@@ -494,103 +988,130 @@ jobs:
           print("========================================")
 
           if not nuove_righe:
-              print("Nessuna nuova estrazione da pubblicare.")
-              print("AggArcMob.txt non modificato.")
+
+              print(
+                  "Nessuna nuova estrazione da pubblicare."
+              )
+
+              print(
+                  "AggArcMob.txt non modificato."
+              )
 
           else:
 
-              righe_finali = righe + nuove_righe
+              righe_finali = (
+                  righe + nuove_righe
+              )
 
-              progressivo_precedente = None
-              data_precedente = None
+              ultimo_finale, data_finale = (
+                  valida_righe_archivio(
+                      righe_finali,
+                      "Validazione finale"
+                  )
+              )
 
-              for indice, riga in enumerate(righe_finali, start=1):
+              if ultimo_finale != nuovo_progressivo:
+                  raise Exception(
+                      "Validazione finale: progressivo finale "
+                      "non coerente."
+                  )
 
-                  if len(riga) != 124:
-                      raise Exception(
-                          f"Validazione finale - riga {indice}: "
-                          f"lunghezza {len(riga)}, attesa 124."
+              if data_finale != riferimenti[-1]["data"]:
+                  raise Exception(
+                      "Validazione finale: data finale "
+                      "non coerente."
+                  )
+
+              # ========================================================
+              # SCRITTURA APPEND-ONLY
+              # ========================================================
+
+              with archivio.open(
+                  "a",
+                  encoding="utf-8",
+                  newline=""
+              ) as f:
+
+                  for nuova_riga in nuove_righe:
+                      f.write(
+                          nuova_riga + "\n"
                       )
 
-                  if not riga[:4].isdigit():
-                      raise Exception(
-                          f"Validazione finale - riga {indice}: "
-                          "progressivo non valido."
-                      )
 
-                  progressivo = int(riga[:4])
+              # ========================================================
+              # RILETTURA REALE DOPO SCRITTURA
+              # ========================================================
 
-                  try:
-                      data_riga = datetime.strptime(
-                          riga[4:14], "%d-%m-%Y"
-                      ).date()
-                  except ValueError:
-                      raise Exception(
-                          f"Validazione finale - riga {indice}: "
-                          "data non valida."
-                      )
+              contenuto_verifica = archivio.read_text(
+                  encoding="utf-8"
+              )
 
-                  dati = riga[14:124]
+              verifica = contenuto_verifica.splitlines()
 
-                  if len(dati) != 110 or not dati.isdigit():
-                      raise Exception(
-                          f"Validazione finale - riga {indice}: "
-                          "dati estrazione non validi."
-                      )
-
-                  if progressivo_precedente is not None:
-
-                      if progressivo != progressivo_precedente + 1:
-                          raise Exception(
-                              f"Validazione finale - riga {indice}: "
-                              "sequenza progressivi interrotta."
-                          )
-
-                      if data_riga <= data_precedente:
-                          raise Exception(
-                              f"Validazione finale - riga {indice}: "
-                              "sequenza date non valida."
-                          )
-
-                  progressivo_precedente = progressivo
-                  data_precedente = data_riga
-
-              with archivio.open("a", encoding="utf-8", newline="") as f:
-                for nuova_riga in nuove_righe:
-                    f.write(nuova_riga + "\n")
-
-              # Rileggo il file realmente scritto
-              verifica = [
-                  x.strip()
-                  for x in archivio.read_text(
-                      encoding="utf-8"
-                  ).splitlines()
-                  if x.strip()
-              ]
+              ultimo_verifica, data_verifica = (
+                  valida_righe_archivio(
+                      verifica,
+                      "Verifica dopo scrittura"
+                  )
+              )
 
               if len(verifica) != len(righe_finali):
                   raise Exception(
-                      "Verifica dopo scrittura: numero righe errato."
+                      "Verifica dopo scrittura: "
+                      "numero righe errato."
                   )
 
-              if verifica[-1] != nuove_righe[-1]:
+              if verifica != righe_finali:
                   raise Exception(
-                      "Verifica dopo scrittura: ultima riga diversa."
+                      "Verifica dopo scrittura: "
+                      "il contenuto riletto non coincide "
+                      "esattamente con quello previsto."
                   )
 
-              print("Archivio completo validato: OK")
-              print("Scrittura locale nel runner: OK")
-              print("Rilettura dopo scrittura: OK")
-              print("Righe totali:", len(verifica))
+              if ultimo_verifica != nuovo_progressivo:
+                  raise Exception(
+                      "Verifica dopo scrittura: "
+                      "ultimo progressivo errato."
+                  )
+
+              if data_verifica != riferimenti[-1]["data"]:
+                  raise Exception(
+                      "Verifica dopo scrittura: "
+                      "ultima data errata."
+                  )
+
+              print(
+                  "Archivio completo validato: OK"
+              )
+
+              print(
+                  "Scrittura locale nel runner: OK"
+              )
+
+              print(
+                  "Rilettura integrale dopo scrittura: OK"
+              )
+
+              print(
+                  "Righe totali:",
+                  len(verifica)
+              )
+
               print(
                   "Ultima progressiva:",
-                  int(verifica[-1][:4])
+                  ultimo_verifica
               )
+
               print(
                   "Ultima data:",
-                  verifica[-1][4:14]
+                  data_verifica.strftime("%d-%m-%Y")
               )
-              print("Pronto per la pubblicazione GitHub.")
+
+              print(
+                  "Pronto per la pubblicazione GitHub."
+              )
+
+
       - name: Pubblica archivio aggiornato
         shell: bash
         run: |
@@ -610,4 +1131,4 @@ jobs:
           echo "========================================"
           echo " LOTTOOLS - PUBBLICAZIONE COMPLETATA"
           echo "========================================"
-          echo "AggArcMob.txt pubblicato su GitHub."  
+          echo "AggArcMob.txt pubblicato su GitHub."
