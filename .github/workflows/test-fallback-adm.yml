@@ -1,0 +1,458 @@
+name: TEST Fallback ADM LottoTools
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test-fallback:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Test fallback ADM senza modificare archivio
+        shell: python
+        run: |
+          from datetime import datetime
+          from urllib.request import Request, urlopen
+          import re
+
+          USER_AGENT = "Mozilla/5.0 LottoToolsUpdater/1.0"
+
+          NOMI_RUOTE_ADM = [
+              "BARI", "CAGLIARI", "FIRENZE", "GENOVA",
+              "MILANO", "NAPOLI", "PALERMO", "ROMA",
+              "TORINO", "VENEZIA", "NAZIONALE"
+          ]
+
+
+          # ============================================================
+          # SCARICA ULTIMA ESTRAZIONE ADM CON POST INDIPENDENTE
+          # ============================================================
+
+          def scarica_ultimo_riferimento_adm():
+
+              url = (
+                  "https://www.adm.gov.it/portale/monopoli/giochi/"
+                  "gioco-del-lotto/lotto_g"
+                  "?p_p_id=it_sogei_wda_web_portlet_WebDisplayAamsPortlet"
+                  "&p_p_lifecycle=2"
+                  "&p_p_state=normal"
+                  "&p_p_mode=view"
+                  "&p_p_cacheability=cacheLevelPage"
+              )
+
+              req = Request(
+                  url,
+                  data=b"",
+                  headers={"User-Agent": USER_AGENT},
+                  method="POST"
+              )
+
+              with urlopen(req, timeout=30) as response:
+                  html = response.read().decode(
+                      "utf-8",
+                      errors="replace"
+                  )
+
+              if not html or not html.strip():
+                  raise Exception(
+                      "ADM: risposta POST vuota."
+                  )
+
+              titolo = re.search(
+                  r"Estrazione\s+n(?:°|&deg;)"
+                  r"(?:\s|&nbsp;)*?(\d+)"
+                  r"(?:\s|&nbsp;)*del"
+                  r"(?:\s|&nbsp;)*"
+                  r"(\d{2}/\d{2}/\d{4})",
+                  html,
+                  re.IGNORECASE
+              )
+
+              if not titolo:
+                  raise Exception(
+                      "ADM: impossibile individuare "
+                      "l'ultima estrazione."
+                  )
+
+              return {
+                  "progressivo": int(titolo.group(1)),
+                  "data": datetime.strptime(
+                      titolo.group(2),
+                      "%d/%m/%Y"
+                  ).date()
+              }
+
+
+          # ============================================================
+          # SCARICA DETTAGLIO DI UNA ESTRAZIONE ADM
+          # ============================================================
+
+          def scarica_estrazione_adm(anno, progressivo):
+
+              url = (
+                  "https://www.adm.gov.it/portale/monopoli/giochi/"
+                  "gioco-del-lotto/lotto_g"
+                  "?_it_sogei_wda_web_portlet_WebDisplayAamsPortlet_anno="
+                  + str(anno)
+                  + "&_it_sogei_wda_web_portlet_WebDisplayAamsPortlet_prog="
+                  + str(progressivo)
+                  + "&p_p_cacheability=cacheLevelPage"
+                  + "&p_p_id=it_sogei_wda_web_portlet_WebDisplayAamsPortlet"
+                  + "&p_p_lifecycle=2&p_p_mode=view&p_p_state=normal"
+              )
+
+              req = Request(
+                  url,
+                  headers={"User-Agent": USER_AGENT}
+              )
+
+              with urlopen(req, timeout=30) as response:
+                  html = response.read().decode(
+                      "utf-8",
+                      errors="replace"
+                  )
+
+              if not html or not html.strip():
+                  raise Exception(
+                      "ADM: risposta dettaglio vuota."
+                  )
+
+              titolo = re.search(
+                  r"Estrazione\s+n(?:°|&deg;)"
+                  r"(?:\s|&nbsp;)*?(\d+)"
+                  r"(?:\s|&nbsp;)*del"
+                  r"(?:\s|&nbsp;)*"
+                  r"(\d{2}/\d{2}/\d{4})",
+                  html,
+                  re.IGNORECASE
+              )
+
+              if not titolo:
+                  raise Exception(
+                      "ADM: titolo estrazione non trovato."
+                  )
+
+              progressivo_trovato = int(
+                  titolo.group(1)
+              )
+
+              if progressivo_trovato != progressivo:
+                  raise Exception(
+                      "ADM: progressivo restituito diverso "
+                      "da quello richiesto."
+                  )
+
+              data_estrazione = datetime.strptime(
+                  titolo.group(2),
+                  "%d/%m/%Y"
+              ).date()
+
+              if data_estrazione.year != anno:
+                  raise Exception(
+                      "ADM: anno restituito non coerente."
+                  )
+
+              numeri = []
+
+              for nome_ruota in NOMI_RUOTE_ADM:
+
+                  inizio = html.find(
+                      ">" + nome_ruota + "</h3>"
+                  )
+
+                  if inizio == -1:
+                      raise Exception(
+                          "ADM: ruota "
+                          + nome_ruota
+                          + " non trovata."
+                      )
+
+                  fine = html.find(
+                      "Numero Oro:",
+                      inizio
+                  )
+
+                  if fine == -1:
+                      raise Exception(
+                          "ADM: fine ruota "
+                          + nome_ruota
+                          + " non trovata."
+                      )
+
+                  blocco = html[inizio:fine]
+
+                  estratti = re.findall(
+                      r'<span class="mr-2">(\d{1,2})</span>',
+                      blocco
+                  )
+
+                  if len(estratti) != 5:
+                      raise Exception(
+                          "ADM: numero estratti non corretto "
+                          "sulla ruota "
+                          + nome_ruota
+                          + "."
+                      )
+
+                  valori = [
+                      int(x)
+                      for x in estratti
+                  ]
+
+                  for valore in valori:
+
+                      if valore < 1 or valore > 90:
+                          raise Exception(
+                              "ADM: estratto fuori intervallo."
+                          )
+
+                  if len(set(valori)) != 5:
+                      raise Exception(
+                          "ADM: estratti duplicati sulla ruota "
+                          + nome_ruota
+                          + "."
+                      )
+
+                  numeri.append(valori)
+
+              if len(numeri) != 11:
+                  raise Exception(
+                      "ADM: numero ruote non corretto."
+                  )
+
+              return {
+                  "progressivo": progressivo_trovato,
+                  "data": data_estrazione,
+                  "numeri": numeri
+              }
+
+
+          # ============================================================
+          # INIZIO TEST
+          # ============================================================
+
+          print("")
+          print("========================================")
+          print(" LOTTOOLS - TEST FALLBACK ADM")
+          print("========================================")
+          print("")
+          print("SIMULAZIONE:")
+          print("Elenco mensile ADM = NON DISPONIBILE")
+          print("")
+          print(
+              "IMPORTANTE: questo workflow NON modifica "
+              "AggArcMob.txt."
+          )
+          print("Nessun commit verrà eseguito.")
+          print("")
+
+          # Simuliamo GitHub fermo alla situazione precedente
+          # al recupero effettuato oggi.
+
+          ultima_data_test = datetime.strptime(
+              "29/09/2026",
+              "%d/%m/%Y"
+          ).date()
+
+          print(
+              "Data archivio simulata:",
+              ultima_data_test.strftime("%d/%m/%Y")
+          )
+
+          print("")
+          print(
+              "TEST: elenco mensile ADM volutamente ignorato."
+          )
+
+          print(
+              "Avvio controllo indipendente tramite POST ADM..."
+          )
+
+
+          # ============================================================
+          # CERCO L'ULTIMA ESTRAZIONE SENZA USARE IL MENSILE
+          # ============================================================
+
+          ultimo = scarica_ultimo_riferimento_adm()
+
+          print("")
+          print(
+              "Ultima estrazione trovata tramite POST:",
+              ultimo["progressivo"],
+              "-",
+              ultimo["data"].strftime("%d/%m/%Y")
+          )
+
+          if ultimo["data"] <= ultima_data_test:
+              raise Exception(
+                  "TEST non valido: ADM non contiene "
+                  "estrazioni successive alla data simulata."
+              )
+
+
+          # ============================================================
+          # RICOSTRUZIONE ALL'INDIETRO
+          # ============================================================
+
+          anno_adm = ultimo["data"].year
+          progressivo_adm = ultimo["progressivo"]
+
+          riferimenti = []
+
+          print("")
+          print(
+              "Ricostruzione sequenza SENZA elenco mensile..."
+          )
+
+          while True:
+
+              if progressivo_adm < 1:
+                  raise Exception(
+                      "TEST: raggiunto cambio anno. "
+                      "Questo test specifico non deve "
+                      "attraversare il cambio anno."
+                  )
+
+              estrazione = scarica_estrazione_adm(
+                  anno_adm,
+                  progressivo_adm
+              )
+
+              print(
+                  "ADM",
+                  estrazione["progressivo"],
+                  "-",
+                  estrazione["data"].strftime("%d/%m/%Y"),
+                  "- dettaglio OK"
+              )
+
+              if estrazione["data"] <= ultima_data_test:
+
+                  if estrazione["data"] != ultima_data_test:
+                      raise Exception(
+                          "TEST FALLITO: la ricostruzione "
+                          "non si è agganciata esattamente "
+                          "alla data 29/09/2026. "
+                          "Data raggiunta: "
+                          + estrazione["data"].strftime(
+                              "%d/%m/%Y"
+                          )
+                      )
+
+                  print("")
+                  print(
+                      "Aggancio esatto alla data archivio: OK"
+                  )
+
+                  break
+
+              riferimenti.append({
+                  "progressivo": estrazione["progressivo"],
+                  "data": estrazione["data"]
+              })
+
+              progressivo_adm -= 1
+
+
+          # ============================================================
+          # ORDINO DAL PIU' VECCHIO AL PIU' RECENTE
+          # ============================================================
+
+          riferimenti.sort(
+              key=lambda x: x["data"]
+          )
+
+          print("")
+          print(
+              "Estrazioni ricostruite:",
+              len(riferimenti)
+          )
+
+          for rif in riferimenti:
+              print(
+                  " -> ADM",
+                  rif["progressivo"],
+                  rif["data"].strftime("%d/%m/%Y")
+              )
+
+
+          # ============================================================
+          # RISULTATO ATTESO DEL TEST
+          # ============================================================
+
+          attese = [
+              (157, "01/10/2026"),
+              (158, "02/10/2026")
+          ]
+
+          if len(riferimenti) != len(attese):
+              raise Exception(
+                  "TEST FALLITO: attese 2 estrazioni, trovate "
+                  + str(len(riferimenti))
+                  + "."
+              )
+
+          for indice, attesa in enumerate(attese):
+
+              progressivo_atteso = attesa[0]
+
+              data_attesa = datetime.strptime(
+                  attesa[1],
+                  "%d/%m/%Y"
+              ).date()
+
+              trovato = riferimenti[indice]
+
+              if (
+                  trovato["progressivo"]
+                  != progressivo_atteso
+              ):
+                  raise Exception(
+                      "TEST FALLITO: progressivo ADM "
+                      "non corrispondente."
+                  )
+
+              if trovato["data"] != data_attesa:
+                  raise Exception(
+                      "TEST FALLITO: data ADM "
+                      "non corrispondente."
+                  )
+
+
+          # ============================================================
+          # TEST SUPERATO
+          # ============================================================
+
+          print("")
+          print("========================================")
+          print(" TEST FALLBACK ADM SUPERATO!")
+          print("========================================")
+          print("")
+          print(
+              "Il mensile ADM NON è stato utilizzato."
+          )
+          print(
+              "La POST indipendente ha individuato "
+              "l'ultima estrazione."
+          )
+          print(
+              "La sequenza è stata ricostruita "
+              "correttamente fino al 29/09/2026."
+          )
+          print("")
+          print(
+              "157 - 01/10/2026 : OK"
+          )
+          print(
+              "158 - 02/10/2026 : OK"
+          )
+          print("")
+          print(
+              "AggArcMob.txt NON modificato."
+          )
+          print(
+              "Nessun commit eseguito."
+          )
