@@ -11,7 +11,7 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Test ricostruzione ADM 2025-2026
+      - name: Test progressivi date e cambio anno ADM
         shell: python
         run: |
           from datetime import datetime
@@ -28,7 +28,7 @@ jobs:
 
 
           # ============================================================
-          # FUNZIONE GET
+          # GET
           # ============================================================
 
           def scarica_testo(url):
@@ -47,8 +47,8 @@ jobs:
 
           # ============================================================
           # ELENCO MENSILE ADM
-          # Usato SOLO per individuare il vero ultimo progressivo
-          # dell'anno precedente durante il cambio anno.
+          # Usato SOLO al cambio anno per trovare il vero ultimo
+          # progressivo ADM dell'anno precedente.
           # ============================================================
 
           def scarica_elenco_mensile_adm(anno, mese):
@@ -118,7 +118,6 @@ jobs:
               )
 
               with urlopen(req, timeout=30) as response:
-
                   html = response.read().decode(
                       "utf-8",
                       errors="replace"
@@ -196,12 +195,7 @@ jobs:
 
               if not titolo:
                   raise Exception(
-                      "ADM: titolo estrazione non trovato. "
-                      + "Anno "
-                      + str(anno)
-                      + ", progressivo "
-                      + str(progressivo)
-                      + "."
+                      "ADM: titolo estrazione non trovato."
                   )
 
               progressivo_trovato = int(
@@ -210,7 +204,7 @@ jobs:
 
               if progressivo_trovato != progressivo:
                   raise Exception(
-                      "ADM: progressivo restituito diverso. "
+                      "ADM: progressivo diverso. "
                       + "Richiesto "
                       + str(progressivo)
                       + ", trovato "
@@ -225,10 +219,10 @@ jobs:
 
               if data_estrazione.year != anno:
                   raise Exception(
-                      "ADM: anno restituito non coerente. "
-                      + "Anno richiesto "
+                      "ADM: anno non coerente. "
+                      + "Richiesto "
                       + str(anno)
-                      + ", data "
+                      + ", restituita data "
                       + data_estrazione.strftime("%d/%m/%Y")
                       + "."
                   )
@@ -309,14 +303,14 @@ jobs:
 
 
           # ============================================================
-          # TROVA ULTIMA ESTRAZIONE DELL'ANNO PRECEDENTE
+          # ULTIMA ESTRAZIONE DELL'ANNO PRECEDENTE
           # ============================================================
 
           def trova_ultimo_riferimento_anno_adm(anno):
 
               print("")
               print(
-                  "CAMBIO ANNO: cerco l'ultima estrazione ADM del",
+                  "CAMBIO ANNO: cerco ultima estrazione del",
                   anno
               )
 
@@ -335,7 +329,7 @@ jobs:
                       "ADM: impossibile individuare "
                       "l'ultima estrazione dell'anno "
                       + str(anno)
-                      + ". Elenco dicembre non disponibile."
+                      + "."
                   ) from ex
 
               if not elenco_dicembre:
@@ -377,18 +371,33 @@ jobs:
 
           print("")
           print("========================================")
-          print(" LOTTOOLS - TEST CAMBIO ANNO ADM")
+          print(" LOTTOOLS - TEST CAMBIO ANNO RINFORZATO")
           print("========================================")
           print("")
           print(
-              "Questo workflow NON modifica AggArcMob.txt."
+              "Controlli:"
           )
           print(
-              "Nessun commit verrà eseguito."
+              "- progressivi ADM percorsi uno per uno"
+          )
+          print(
+              "- date ADM strettamente decrescenti"
+          )
+          print(
+              "- cambio anno controllato"
+          )
+          print(
+              "- aggancio esatto alla data archivio"
+          )
+          print(
+              "- 11 ruote x 5 estratti validati"
+          )
+          print("")
+          print(
+              "AggArcMob.txt NON verrà modificato."
           )
           print("")
 
-          # Stessa data usata nel grande collaudo VB.NET.
           ultima_data_test = datetime.strptime(
               "23/12/2025",
               "%d/%m/%Y"
@@ -399,15 +408,9 @@ jobs:
               ultima_data_test.strftime("%d/%m/%Y")
           )
 
-          print("")
-          print(
-              "Cerco l'ultima estrazione ADM "
-              "tramite POST indipendente..."
-          )
-
 
           # ============================================================
-          # ULTIMA ESTRAZIONE ATTUALE
+          # TROVO ULTIMA ADM
           # ============================================================
 
           ultimo = scarica_ultimo_riferimento_adm()
@@ -421,13 +424,13 @@ jobs:
 
           if ultimo["data"] <= ultima_data_test:
               raise Exception(
-                  "TEST non valido: ADM non contiene "
-                  "estrazioni successive alla data simulata."
+                  "TEST non valido: nessuna estrazione "
+                  "successiva alla data simulata."
               )
 
 
           # ============================================================
-          # RICOSTRUZIONE
+          # RICOSTRUZIONE RINFORZATA
           # ============================================================
 
           anno_adm = ultimo["data"].year
@@ -436,6 +439,16 @@ jobs:
           riferimenti = []
 
           cambio_anno_eseguito = False
+
+          # Memorizza l'ultima estrazione già letta andando
+          # all'indietro. La successiva deve avere SEMPRE
+          # una data strettamente precedente.
+          data_successiva = None
+
+          # Serve per controllare che nello stesso anno
+          # i progressivi siano realmente N, N-1, N-2...
+          progressivo_successivo = None
+          anno_successivo = None
 
           print("")
           print(
@@ -447,40 +460,113 @@ jobs:
 
               if progressivo_adm < 1:
 
-                  anno_adm -= 1
+                  anno_precedente = anno_adm - 1
 
                   print("")
                   print("========================================")
                   print(
-                      " RAGGIUNTO CAMBIO ANNO ->",
-                      anno_adm
+                      " CAMBIO ANNO "
+                      + str(anno_adm)
+                      + " -> "
+                      + str(anno_precedente)
                   )
                   print("========================================")
 
                   ultimo_anno_precedente = (
                       trova_ultimo_riferimento_anno_adm(
-                          anno_adm
+                          anno_precedente
                       )
                   )
+
+                  # La data dell'ultima estrazione dell'anno
+                  # precedente deve essere precedente alla prima
+                  # estrazione già letta dell'anno successivo.
+                  if (
+                      data_successiva is not None
+                      and
+                      ultimo_anno_precedente["data"]
+                      >= data_successiva
+                  ):
+                      raise Exception(
+                          "TEST FALLITO: data non coerente "
+                          "nel cambio anno."
+                      )
+
+                  anno_adm = anno_precedente
 
                   progressivo_adm = (
                       ultimo_anno_precedente["progressivo"]
                   )
 
+                  # Al cambio anno il progressivo riparte.
+                  # Non confrontiamo numericamente i progressivi
+                  # appartenenti a due anni diversi.
+                  progressivo_successivo = None
+                  anno_successivo = None
+
                   cambio_anno_eseguito = True
+
 
               estrazione = scarica_estrazione_adm(
                   anno_adm,
                   progressivo_adm
               )
 
+
+              # ========================================================
+              # CONTROLLO PROGRESSIVITA' ADM
+              # ========================================================
+
+              if (
+                  progressivo_successivo is not None
+                  and anno_successivo == anno_adm
+              ):
+
+                  if (
+                      estrazione["progressivo"]
+                      != progressivo_successivo - 1
+                  ):
+                      raise Exception(
+                          "TEST FALLITO: sequenza progressivi ADM "
+                          "interrotta nell'anno "
+                          + str(anno_adm)
+                          + "."
+                      )
+
+
+              # ========================================================
+              # CONTROLLO PROGRESSIVITA' DATE
+              # ========================================================
+
+              if data_successiva is not None:
+
+                  if estrazione["data"] >= data_successiva:
+                      raise Exception(
+                          "TEST FALLITO: date ADM non "
+                          "strettamente decrescenti. "
+                          + estrazione["data"].strftime(
+                              "%d/%m/%Y"
+                          )
+                          + " non precede "
+                          + data_successiva.strftime(
+                              "%d/%m/%Y"
+                          )
+                          + "."
+                      )
+
+
               print(
                   "ADM",
                   estrazione["progressivo"],
                   "-",
                   estrazione["data"].strftime("%d/%m/%Y"),
-                  "- OK"
+                  "- progressivo OK - data OK"
               )
+
+
+              # ========================================================
+              # AGGANCIO ALL'ARCHIVIO
+              # ========================================================
 
               if estrazione["data"] <= ultima_data_test:
 
@@ -488,11 +574,11 @@ jobs:
 
                       raise Exception(
                           "TEST FALLITO: aggancio non esatto. "
-                          + "Data archivio simulata "
+                          + "Attesa "
                           + ultima_data_test.strftime(
                               "%d/%m/%Y"
                           )
-                          + ", data ADM raggiunta "
+                          + ", raggiunta "
                           + estrazione["data"].strftime(
                               "%d/%m/%Y"
                           )
@@ -506,10 +592,20 @@ jobs:
 
                   break
 
+
               riferimenti.append({
                   "progressivo": estrazione["progressivo"],
                   "data": estrazione["data"]
               })
+
+
+              data_successiva = estrazione["data"]
+
+              progressivo_successivo = (
+                  estrazione["progressivo"]
+              )
+
+              anno_successivo = anno_adm
 
               progressivo_adm -= 1
 
@@ -520,45 +616,49 @@ jobs:
 
           if not cambio_anno_eseguito:
               raise Exception(
-                  "TEST FALLITO: il cambio anno "
-                  "non è stato attraversato."
+                  "TEST FALLITO: cambio anno non attraversato."
               )
-
-          riferimenti.sort(
-              key=lambda x: x["data"]
-          )
 
           if not riferimenti:
               raise Exception(
                   "TEST FALLITO: nessuna estrazione ricostruita."
               )
 
-          # Le date devono essere strettamente crescenti.
+          riferimenti.sort(
+              key=lambda x: x["data"]
+          )
+
+
+          # Dopo averle ordinate cronologicamente,
+          # controllo nuovamente le date in avanti.
+
           data_precedente = ultima_data_test
 
           for rif in riferimenti:
 
               if rif["data"] <= data_precedente:
                   raise Exception(
-                      "TEST FALLITO: sequenza date "
+                      "TEST FALLITO: sequenza cronologica finale "
                       "non strettamente crescente."
                   )
 
               data_precedente = rif["data"]
 
+
           if riferimenti[-1]["data"] != ultimo["data"]:
               raise Exception(
-                  "TEST FALLITO: l'ultima data ricostruita "
-                  "non coincide con l'ultima ADM."
+                  "TEST FALLITO: ultima data ricostruita "
+                  "diversa dall'ultima ADM."
               )
+
 
           if (
               riferimenti[-1]["progressivo"]
               != ultimo["progressivo"]
           ):
               raise Exception(
-                  "TEST FALLITO: l'ultimo progressivo "
-                  "ricostruito non coincide con l'ultima ADM."
+                  "TEST FALLITO: ultimo progressivo "
+                  "diverso dall'ultima ADM."
               )
 
 
@@ -568,9 +668,15 @@ jobs:
 
           print("")
           print("========================================")
-          print(" TEST CAMBIO ANNO SUPERATO!")
+          print(" TEST CAMBIO ANNO RINFORZATO SUPERATO!")
           print("========================================")
           print("")
+          print(
+              "Progressivi ADM consecutivi: OK"
+          )
+          print(
+              "Date ADM strettamente ordinate: OK"
+          )
           print(
               "Cambio anno attraversato: OK"
           )
@@ -578,17 +684,21 @@ jobs:
               "Aggancio esatto al 23/12/2025: OK"
           )
           print(
-              "Sequenza cronologica ricostruita: OK"
+              "Sequenza cronologica finale: OK"
+          )
+          print(
+              "11 ruote x 5 estratti per ogni ADM: OK"
+          )
+          print("")
+          print(
+              "Estrazioni mancanti ricostruite:",
+              len(riferimenti)
           )
           print(
               "Ultima estrazione raggiunta:",
               riferimenti[-1]["progressivo"],
               "-",
               riferimenti[-1]["data"].strftime("%d/%m/%Y")
-          )
-          print(
-              "Estrazioni mancanti ricostruite:",
-              len(riferimenti)
           )
           print("")
           print(
