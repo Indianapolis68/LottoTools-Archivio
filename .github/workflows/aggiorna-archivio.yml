@@ -18,6 +18,20 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
+      - name: Diagnostica orari GitHub
+        shell: bash
+        env:
+          EVENTO: ${{ github.event_name }}
+          CRON: ${{ github.event.schedule }}
+        run: |
+          echo "========================================"
+          echo " LOTTOOLS - DIAGNOSTICA ORARI"
+          echo "========================================"
+          echo "Evento: $EVENTO"
+          echo "Cron programmato: $CRON"
+          echo "Ora UTC: $(date -u '+%d-%m-%Y %H:%M:%S')"
+          echo "Ora italiana: $(TZ=Europe/Rome date '+%d-%m-%Y %H:%M:%S %Z')"
+          echo "========================================"
       - name: Scarica repository
         uses: actions/checkout@v7
 
