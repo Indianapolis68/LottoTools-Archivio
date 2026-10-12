@@ -2,17 +2,27 @@ name: Aggiorna archivio LottoTools
 
 on:
   workflow_dispatch:
+  
   schedule:
-    - cron: "17 21 * * *"
+    - cron: "13 20 * * *"
       timezone: "Europe/Rome"
-    - cron: "47 21 * * *" 
+    - cron: "33 20 * * *"
       timezone: "Europe/Rome"
-    - cron: "17 22 * * *" 
+    - cron: "53 20 * * *"
       timezone: "Europe/Rome"
-    - cron: "47 22 * * *" 
+    - cron: "13 21 * * *"
       timezone: "Europe/Rome"
-    - cron: "17 23 * * *" 
+    - cron: "33 21 * * *"
       timezone: "Europe/Rome"
+    - cron: "53 21 * * *"
+      timezone: "Europe/Rome"
+    - cron: "13 22 * * *"
+      timezone: "Europe/Rome"
+    - cron: "33 22 * * *"
+      timezone: "Europe/Rome"
+    - cron: "53 22 * * *"
+      timezone: "Europe/Rome"
+
 permissions:
   contents: write
 
