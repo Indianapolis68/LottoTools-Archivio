@@ -8,7 +8,9 @@ on:
     - cron: "17 20 * * *"
     - cron: "47 20 * * *"
     - cron: "17 21 * * *"
-
+# Controllo sperimentale con fuso italiano
+    - cron: "37 22 * * *"
+      timezone: "Europe/Rome"
 permissions:
   contents: write
 
