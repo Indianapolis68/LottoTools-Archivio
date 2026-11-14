@@ -721,10 +721,9 @@ jobs:
               print(
                   "Pronto per la pubblicazione GitHub."
               )
-
-
+      
       - name: Pubblica archivio aggiornato
-        if: inputs.publish == true
+        if: github.event_name == 'schedule' || inputs.publish == true
         shell: bash
         run: |
           if git diff --quiet -- AggArcMob.txt; then
