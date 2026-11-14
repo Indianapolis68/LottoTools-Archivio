@@ -77,10 +77,39 @@ jobs:
               "Napoli", "Palermo", "Roma", "Torino", "Venezia", "Nazionale"
           ]
 
+         
           def scarica_testo(url):
-              req = Request(url, headers={"User-Agent": USER_AGENT})
-              with urlopen(req, timeout=30) as response:
-                  return response.read().decode("utf-8", errors="replace")
+              import time
+
+              for tentativo in range(1, 4):
+                  try:
+                      print(f"Download {url} - tentativo {tentativo}/3", flush=True)
+
+                      req = Request(
+                          url,
+                          headers={"User-Agent": USER_AGENT}
+                      )
+
+                      with urlopen(req, timeout=45) as response:
+                          testo = response.read().decode(
+                              "utf-8", errors="replace"
+                          )
+
+                      if not testo.strip():
+                          raise Exception("Risposta HTML vuota.")
+
+                      print(f"Download riuscito: {len(testo)} caratteri", flush=True)
+                      return testo
+
+                  except Exception as ex:
+                      print(f"Tentativo {tentativo} fallito: {ex}", flush=True)
+
+                      if tentativo == 3:
+                          raise Exception(
+                              "Impossibile scaricare la fonte dopo 3 tentativi."
+                          ) from ex
+
+                      time.sleep(tentativo * 5)
 
           def scarica_archivio_annuale(anno):
               url = f"https://www.estrazionedellotto.it/risultati/archivio-lotto-{anno}"
