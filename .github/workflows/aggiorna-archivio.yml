@@ -43,8 +43,29 @@ jobs:
           echo "Ora UTC: $(date -u '+%d-%m-%Y %H:%M:%S')"
           echo "Ora italiana: $(TZ=Europe/Rome date '+%d-%m-%Y %H:%M:%S %Z')"
           echo "========================================"
+      
       - name: Scarica repository
         uses: actions/checkout@v7
+
+      - name: Diagnostica connessione archivio Lotto
+        shell: bash
+        run: |
+          echo "========================================"
+          echo " LOTTOOLS - DIAGNOSTICA CONNESSIONE"
+          echo "========================================"
+
+          echo "=== RISOLUZIONE DNS ==="
+          getent ahosts www.estrazionedellotto.it || true
+
+          echo "=== CONNESSIONE HTTPS IPv4 ==="
+          curl -4 -IL --connect-timeout 10 --max-time 20 \
+            https://www.estrazionedellotto.it/risultati/archivio-lotto-2026 || true
+
+          echo "=== CONNESSIONE HTTPS IPv6 ==="
+          curl -6 -IL --connect-timeout 10 --max-time 20 \
+            https://www.estrazionedellotto.it/risultati/archivio-lotto-2026 || true
+
+          echo "========================================"
 
       - name: Cerca e verifica estrazioni mancanti
         shell: python
